@@ -42,4 +42,13 @@ import org.springframework.context.annotation.FilterType;
 		@Filter(type = FilterType.CUSTOM, classes = AutoConfigurationExcludeFilter.class) })
 public @interface Modulith {
 
+	boolean useFullyQualifiedModuleNames() default false;
+
+	/**
+	 * Defines which additional packages shall be considered shall be considered as modulith base packages in addition to
+	 * the one of the class carrying this annotation.
+	 * 
+	 * @return
+	 */
+	String[] additionalPackages() default {};
 }

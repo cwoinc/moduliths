@@ -29,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.ApplicationContext;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
 
 import com.acme.myproject.NonVerifyingModuleTest;
@@ -57,6 +58,7 @@ public class ModuleBTest {
 
 	@NonVerifyingModuleTest
 	@RunWith(SpringRunner.class)
+	@TestPropertySource(properties = "debug=true")
 	public static class TestWithMocks {
 
 		@Autowired ApplicationContext context;

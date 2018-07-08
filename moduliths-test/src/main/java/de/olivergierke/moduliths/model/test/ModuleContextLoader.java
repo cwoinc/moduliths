@@ -16,9 +16,12 @@
 package de.olivergierke.moduliths.model.test;
 
 import de.olivergierke.moduliths.model.Module;
+import de.olivergierke.moduliths.model.Modules;
+import de.olivergierke.moduliths.model.test.ModuleContextLoader.SomeConfig.MyImpo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -26,13 +29,22 @@ import java.util.stream.Collectors;
 
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
+import org.springframework.beans.factory.support.BeanDefinitionBuilder;
+import org.springframework.beans.factory.support.BeanDefinitionRegistry;
+import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
 import org.springframework.boot.autoconfigure.domain.EntityScanPackages;
 import org.springframework.boot.test.context.SpringBootContextLoader;
 import org.springframework.context.ApplicationContextInitializer;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
+import org.springframework.core.Ordered;
+import org.springframework.core.PriorityOrdered;
+import org.springframework.core.annotation.Order;
+import org.springframework.core.type.AnnotationMetadata;
 import org.springframework.test.context.ContextLoader;
 import org.springframework.test.context.MergedContextConfiguration;
 
@@ -53,29 +65,94 @@ class ModuleContextLoader extends SpringBootContextLoader {
 	protected List<ApplicationContextInitializer<?>> getInitializers(MergedContextConfiguration config,
 			SpringApplication application) {
 
-		ModuleTestExecution execution = new ModuleTestExecution(config.getTestClass());
-
-		logModules(execution);
-
-		List<ApplicationContextInitializer<?>> initializers = super.getInitializers(config, application);
+		List<ApplicationContextInitializer<?>> initializers = new ArrayList<>(super.getInitializers(config, application));
 
 		initializers.add(applicationContext -> {
+
+			ModuleTestExecution execution = ModuleTestExecution.of(config.getTestClass());
+
+			logModules(execution);
 
 			List<String> basePackages = execution.getBasePackages().collect(Collectors.toList());
 			ConfigurableListableBeanFactory beanFactory = applicationContext.getBeanFactory();
 
+			// beanFactory.registerSingleton("foobar", new BeanPostProcessor() {
+			//
+			// public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+			//
+			// if (!bean.getClass().getName().endsWith("BasePackages")) {
+			// return bean;
+			// }
+			//
+			// Field field = ReflectionUtils.findField(bean.getClass(), "packages");
+			// ReflectionUtils.makeAccessible(field);
+			// ReflectionUtils.setField(field, bean, basePackages);
+			//
+			// return bean;
+			// }
+			// });
+
 			beanFactory.registerSingleton("__moduleTestExecution", execution);
 
-			beanFactory.registerSingleton("modulePackageToAutoConfigAndEntityScanPackagePostProcessor",
-					new BeanFactoryPostProcessorImplementation(basePackages));
+			// BeanFactoryPostProcessorImplementation postProcessor = new
+			// BeanFactoryPostProcessorImplementation(basePackages);
+
+			// beanFactory.registerSingleton("bla", new MyImpo(basePackages));
+			// applicationContext.addBeanFactoryPostProcessor(postProcessor);
+
+			// ((AnnotationConfigApplicationContext) applicationContext).register(SomeConfig.class);
 		});
 
 		return initializers;
 	}
 
+	@Configuration
+	@Order(Ordered.LOWEST_PRECEDENCE)
+	@Import(MyImpo.class)
+	static class SomeConfig {
+
+		@RequiredArgsConstructor
+		static class MyImpo implements ImportBeanDefinitionRegistrar {
+
+			// private final List<String> packageNames;
+
+			/* 
+			 * (non-Javadoc)
+			 * @see org.springframework.context.annotation.ImportBeanDefinitionRegistrar#registerBeanDefinitions(org.springframework.core.type.AnnotationMetadata, org.springframework.beans.factory.support.BeanDefinitionRegistry)
+			 */
+			@Override
+			public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
+
+				setPackageOnBeanNamed(registry, AutoConfigurationPackages.class.getName());
+				setPackageOnBeanNamed(registry, EntityScanPackages.class.getName());
+			}
+
+			private void setPackageOnBeanNamed(BeanDefinitionRegistry beanFactory, String beanName) {
+
+				if (beanFactory.containsBeanDefinition(beanName)) {
+
+					BeanDefinition definition = beanFactory.getBeanDefinition(beanName);
+					definition.getConstructorArgumentValues().addIndexedArgumentValue(0, Arrays.asList("foo"));
+				}
+
+				else {
+
+					BeanDefinitionBuilder builder = BeanDefinitionBuilder
+							.rootBeanDefinition(beanName == AutoConfigurationPackages.class.getName()
+									? "org.springframework.boot.autoconfigure.AutoConfigurationPackages.BasePackages"
+									: "org.springframework.boot.autoconfigure.domain.EntityScanPackages");
+					// builder.addConstructorArgValue(packageNames.toArray(new String[packageNames.size()]));
+
+					beanFactory.registerBeanDefinition(beanName, builder.getBeanDefinition());
+				}
+			}
+		}
+	}
+
 	private static void logModules(ModuleTestExecution execution) {
 
 		Module module = execution.getModule();
+		Modules modules = execution.getModules();
 		String moduleName = module.getDisplayName();
 		String bootstrapMode = execution.getBootstrapMode().name();
 
@@ -84,7 +161,7 @@ class ModuleContextLoader extends SpringBootContextLoader {
 		LOG.info(message);
 		LOG.info(getSeparator("=", message));
 
-		Arrays.stream(module.toString().split("\n")).forEach(LOG::info);
+		Arrays.stream(module.toString(modules).split("\n")).forEach(LOG::info);
 
 		List<Module> dependencies = execution.getDependencies();
 
@@ -95,7 +172,7 @@ class ModuleContextLoader extends SpringBootContextLoader {
 			LOG.info(getSeparator("=", message));
 
 			dependencies.stream() //
-					.map(Module::toString) //
+					.map(it -> it.toString(modules)) //
 					.forEach(it -> {
 						Arrays.stream(it.split("\n")).forEach(LOG::info);
 					});
@@ -112,28 +189,58 @@ class ModuleContextLoader extends SpringBootContextLoader {
 	 * @author Oliver Gierke
 	 */
 	@RequiredArgsConstructor
-	private static class BeanFactoryPostProcessorImplementation implements BeanFactoryPostProcessor {
+	private static class BeanFactoryPostProcessorImplementation
+			implements BeanDefinitionRegistryPostProcessor, PriorityOrdered {
 
 		private final List<String> packageNames;
 
-		/*
+		/* 
 		 * (non-Javadoc)
-		 * @see org.springframework.beans.factory.config.BeanFactoryPostProcessor#postProcessBeanFactory(org.springframework.beans.factory.config.ConfigurableListableBeanFactory)
+		 * @see org.springframework.core.Ordered#getOrder()
 		 */
 		@Override
-		public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
-
-			setPackageOnBeanNamed(beanFactory, AutoConfigurationPackages.class.getName());
-			setPackageOnBeanNamed(beanFactory, EntityScanPackages.class.getName());
+		public int getOrder() {
+			return Ordered.LOWEST_PRECEDENCE;
 		}
 
-		private void setPackageOnBeanNamed(ConfigurableListableBeanFactory beanFactory, String beanName) {
+		private void setPackageOnBeanNamed(BeanDefinitionRegistry beanFactory, String beanName) {
 
 			if (beanFactory.containsBeanDefinition(beanName)) {
 
 				BeanDefinition definition = beanFactory.getBeanDefinition(beanName);
 				definition.getConstructorArgumentValues().addIndexedArgumentValue(0, packageNames);
 			}
+
+			else {
+
+				BeanDefinitionBuilder builder = BeanDefinitionBuilder
+						.rootBeanDefinition(beanName == AutoConfigurationPackages.class.getName()
+								? "org.springframework.boot.autoconfigure.AutoConfigurationPackages.BasePackages"
+								: "org.springframework.boot.autoconfigure.domain.EntityScanPackages");
+				builder.addConstructorArgValue(packageNames.toArray(new String[packageNames.size()]));
+			}
+		}
+
+		/* 
+		 * (non-Javadoc)
+		 * @see org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor#postProcessBeanDefinitionRegistry(org.springframework.beans.factory.support.BeanDefinitionRegistry)
+		 */
+		@Override
+		public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
+			setPackageOnBeanNamed(registry, AutoConfigurationPackages.class.getName());
+			setPackageOnBeanNamed(registry, EntityScanPackages.class.getName());
+
+		}
+
+		/* 
+		 * (non-Javadoc)
+		 * @see org.springframework.beans.factory.config.BeanFactoryPostProcessor#postProcessBeanFactory(org.springframework.beans.factory.config.ConfigurableListableBeanFactory)
+		 */
+		@Override
+		public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
+
+			// setPackageOnBeanNamed(beanFactory, AutoConfigurationPackages.class.getName());
+			// setPackageOnBeanNamed(beanFactory, EntityScanPackages.class.getName());
 		}
 	}
 }

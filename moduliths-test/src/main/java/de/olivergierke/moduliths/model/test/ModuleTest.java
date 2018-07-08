@@ -44,6 +44,8 @@ import org.springframework.test.context.ContextConfiguration;
 @BootstrapWith(SpringBootTestContextBootstrapper.class)
 @TypeExcludeFilters(ModuleTypeExcludeFilter.class)
 @ContextConfiguration(loader = ModuleContextLoader.class)
+// @AutoConfigureModule
+// @ImportAutoConfiguration
 public @interface ModuleTest {
 
 	@AliasFor("mode")
